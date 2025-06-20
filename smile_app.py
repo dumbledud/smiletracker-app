@@ -1,6 +1,5 @@
 import streamlit as st
 import cv2
-import mediapipe as mp
 from deepface import DeepFace
 import tempfile
 import os
@@ -8,13 +7,6 @@ import numpy as np
 import pandas as pd
 from datetime import datetime
 
-# Initialize Mediapipe face detection
-mp_face_detection = mp.solutions.face_detection
-mp_drawing = mp.solutions.drawing_utils
-
-# YOLOv8 is assumed to be run separately or mocked below for shot detection
-
-# Smile + shot detection logic
 def analyze_video(video_path, max_frames=3000):
     cap = cv2.VideoCapture(video_path)
     frame_rate = int(cap.get(cv2.CAP_PROP_FPS))
@@ -22,10 +14,8 @@ def analyze_video(video_path, max_frames=3000):
     duration = total_frames // frame_rate
 
     smile_data = []
-    face_detector = mp_face_detection.FaceDetection(model_selection=1, min_detection_confidence=0.6)
-
-    shot_number = 0
     frame_count = 0
+    shot_number = 0
     smile_accumulator = []
 
     while cap.isOpened() and frame_count < max_frames:
@@ -33,30 +23,26 @@ def analyze_video(video_path, max_frames=3000):
         if not ret:
             break
 
-        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        results = face_detector.process(rgb_frame)
+        # Resize to speed up
+        resized_frame = cv2.resize(frame, (640, 360))
 
-        if results.detections:
-            for detection in results.detections:
-                bboxC = detection.location_data.relative_bounding_box
-                ih, iw, _ = frame.shape
-                x, y, w, h = int(bboxC.xmin * iw), int(bboxC.ymin * ih), int(bboxC.width * iw), int(bboxC.height * ih)
-                face_crop = frame[y:y+h, x:x+w]
+        # Try to analyze emotion with DeepFace
+        try:
+            analysis = DeepFace.analyze(resized_frame, actions=['emotion'], enforce_detection=False)
+            dominant_emotion = analysis[0]['dominant_emotion']
+            is_smiling = dominant_emotion.lower() == 'happy'
+        except:
+            is_smiling = False
 
-                try:
-                    analysis = DeepFace.analyze(face_crop, actions=['emotion'], enforce_detection=False)
-                    is_smiling = analysis[0]['dominant_emotion'] == 'happy'
-                    smile_accumulator.append(is_smiling)
-                except:
-                    smile_accumulator.append(False)
+        smile_accumulator.append(is_smiling)
 
-        # Every 5 seconds = trigger a new shot
+        # Every 5 seconds (approx) = 1 "shot"
         if frame_count % (frame_rate * 5) == 0 and frame_count > 0:
             shot_number += 1
             smile_majority = smile_accumulator.count(True) > len(smile_accumulator) / 2
             smile_data.append({
                 "Shot Number": shot_number,
-                "Shot Made": True,  # mocked here
+                "Shot Made": True,  # mocked
                 "Smile Detected": smile_majority,
                 "Timestamp": str(datetime.now().time()).split('.')[0]
             })
@@ -65,8 +51,8 @@ def analyze_video(video_path, max_frames=3000):
         frame_count += 1
 
     cap.release()
-    face_detector.close()
-    return smile_data[:30]
+    return smile_data[:30]  # Limit to 30 shots
+
 
 # Streamlit interface
 st.set_page_config(page_title="SmileTracker Pro", layout="centered")
